@@ -47,3 +47,28 @@ install(
 )
 
 # testing
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+add_subdirectory(${PROJECT_SOURCE_DIR}/ThirdParty/mint/interop interop_build)
+if (TARGET interop)
+    if (TARGET RenderingOpenVR)
+    message("adding interop")
+    target_link_libraries(RenderingOpenVR PRIVATE interop)
+    set_property(TARGET RenderingOpenVR PROPERTY CXX_STANDARD 17)
+    endif()
+endif()
+
+
+# GLM
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+set(GLM_TEST_ENABLE OFF CACHE BOOL "" FORCE)
+set(GLM_TEST_ENABLE_CXX_14 ON CACHE BOOL "" FORCE)
+add_subdirectory(${PROJECT_SOURCE_DIR}/ThirdParty/mint/rendering/external/glm/ glm_build)
+if (TARGET glm)
+    if (TARGET RenderingOpenVR)
+    message("adding glm")
+    target_link_libraries(RenderingOpenVR PRIVATE glm)
+    set_property(TARGET RenderingOpenVR PROPERTY CXX_STANDARD 17)
+    endif()
+endif()

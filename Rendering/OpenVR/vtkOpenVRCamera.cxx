@@ -25,6 +25,13 @@
 
 #include <cmath>
 
+#include "interop.hpp"
+#define GLM_FORCE_CTOR_INIT
+#define GLM_FORCE_EXPLICIT_CTOR
+#include <glm/glm.hpp> // vec2, vec3, mat4, radians
+#include <glm/ext.hpp> // perspective, translate, rotate
+#include <glm/gtx/transform.hpp> // rotate in degrees around axis
+
 vtkStandardNewMacro(vtkOpenVRCamera);
 
 vtkOpenVRCamera::vtkOpenVRCamera() = default;
@@ -32,6 +39,26 @@ vtkOpenVRCamera::~vtkOpenVRCamera() = default;
 
 // a reminder, with vtk order matrices multiplcation goes right to left
 // e.g. vtkMatrix4x4::Multiply(BtoC, AtoB, AtoC);
+
+class mint_communitcation
+{
+public:
+  mint_communitcation()
+  {
+    mint::DataProtocol zmq_protocol = mint::DataProtocol::TCP;
+    mint::ImageProtocol spout_protocol = mint::ImageProtocol::GPU;
+    mint::init(mint::Role::Rendering, zmq_protocol, spout_protocol);
+
+    data_receiver = std::make_unique<mint::DataReceiver>();
+    data_receiver->start();
+  }
+  ~mint_communitcation()
+  {
+    data_receiver->stop();
+  }
+  std::unique_ptr<mint::DataReceiver> data_receiver;
+};
+std::unique_ptr<mint_communitcation> mint_comm_cam;
 
 namespace
 {
@@ -70,6 +97,45 @@ void vtkOpenVRCamera::UpdateHMDToEyeMatrices(vtkRenderer* ren)
 
   matEye = hMD->GetEyeToHeadTransform(vr::Eye_Right);
   setMatrixFromOpenVRMatrix(this->HMDToRightEyeMatrix, matEye);
+
+  // init mint
+  if (mint_comm_cam == nullptr)
+  {
+    mint_comm_cam = std::make_unique<mint_communitcation>();
+  }
+
+  auto stereoCameraView = mint::StereoCameraViewRelative();
+  if (mint_comm_cam->data_receiver->receive<mint::StereoCameraViewRelative>(stereoCameraView))
+  {
+    // left
+    // view matrix
+    glm::mat4 viewLeft = glm::lookAt(
+      glm::vec3(stereoCameraView.leftEyeView.eyePos.x, stereoCameraView.leftEyeView.eyePos.y,
+        stereoCameraView.leftEyeView.eyePos.z),
+      glm::vec3(stereoCameraView.leftEyeView.lookAtPos.x, stereoCameraView.leftEyeView.lookAtPos.y,
+        stereoCameraView.leftEyeView.lookAtPos.z),
+      glm::vec3(stereoCameraView.leftEyeView.camUpDir.x, stereoCameraView.leftEyeView.camUpDir.y,
+        stereoCameraView.leftEyeView.camUpDir.z));
+
+    glm::mat4 viewRight = glm::lookAt(
+      glm::vec3(stereoCameraView.rightEyeView.eyePos.x, stereoCameraView.rightEyeView.eyePos.y,
+        stereoCameraView.rightEyeView.eyePos.z),
+      glm::vec3(stereoCameraView.rightEyeView.lookAtPos.x,
+        stereoCameraView.rightEyeView.lookAtPos.y, stereoCameraView.rightEyeView.lookAtPos.z),
+      glm::vec3(stereoCameraView.rightEyeView.camUpDir.x, stereoCameraView.rightEyeView.camUpDir.y,
+        stereoCameraView.rightEyeView.camUpDir.z));
+
+    for (int i = 0; i < 4; i++)
+    {
+      for (int j = 0; j < 4; j++)
+      {
+        // (row, column)        (column, row)
+        this->HMDToLeftEyeMatrix->SetElement(i, j, viewLeft[j][i]);
+        this->HMDToRightEyeMatrix->SetElement(i, j, viewRight[j][i]);
+      }
+    }
+  }
+
 }
 
 //------------------------------------------------------------------------------
@@ -93,10 +159,10 @@ void vtkOpenVRCamera::UpdateWorldToEyeMatrices(vtkRenderer* ren)
   this->PhysicalToHMDMatrix->Invert();
 
   // compute the physicalToEye matrices
-  vtkMatrix4x4::Multiply4x4(
-    this->HMDToLeftEyeMatrix, this->PhysicalToHMDMatrix, this->PhysicalToLeftEyeMatrix);
-  vtkMatrix4x4::Multiply4x4(
-    this->HMDToRightEyeMatrix, this->PhysicalToHMDMatrix, this->PhysicalToRightEyeMatrix);
+  //vtkMatrix4x4::Multiply4x4(
+  //  this->HMDToLeftEyeMatrix, this->PhysicalToHMDMatrix, this->PhysicalToLeftEyeMatrix);
+  //vtkMatrix4x4::Multiply4x4(
+  //  this->HMDToRightEyeMatrix, this->PhysicalToHMDMatrix, this->PhysicalToRightEyeMatrix);
 
   // get the world to physical matrix by inverting phsycialToWorld
   win->GetPhysicalToWorldMatrix(this->WorldToPhysicalMatrix);
@@ -104,9 +170,9 @@ void vtkOpenVRCamera::UpdateWorldToEyeMatrices(vtkRenderer* ren)
 
   // compute the world to eye matrices
   vtkMatrix4x4::Multiply4x4(
-    this->PhysicalToLeftEyeMatrix, this->WorldToPhysicalMatrix, this->WorldToLeftEyeMatrix);
+    this->HMDToLeftEyeMatrix, this->WorldToPhysicalMatrix, this->WorldToLeftEyeMatrix);
   vtkMatrix4x4::Multiply4x4(
-    this->PhysicalToRightEyeMatrix, this->WorldToPhysicalMatrix, this->WorldToRightEyeMatrix);
+    this->HMDToRightEyeMatrix, this->WorldToPhysicalMatrix, this->WorldToRightEyeMatrix);
 }
 
 //------------------------------------------------------------------------------
@@ -153,6 +219,25 @@ void vtkOpenVRCamera::UpdateEyeToProjectionMatrices(vtkRenderer* ren)
   this->RightEyeToProjectionMatrix->SetElement(2, 2, -(znear + zfar) / (zfar - znear));
   this->RightEyeToProjectionMatrix->SetElement(3, 2, -1);
   this->RightEyeToProjectionMatrix->SetElement(2, 3, -2 * znear * zfar / (zfar - znear));
+
+  auto cameraProjection = mint::CameraProjection();
+
+  if (mint_comm_cam->data_receiver->receive<mint::CameraProjection>(cameraProjection))
+  {
+    auto projection = glm::perspective(cameraProjection.fieldOfViewY_rad, cameraProjection.aspect,
+      cameraProjection.nearClipPlane, cameraProjection.farClipPlane);
+
+    for (int i = 0; i < 4; i++)
+    {
+      for (int j = 0; j < 4; j++)
+      {
+        // (row, column)        (column, row)
+        this->RightEyeToProjectionMatrix->SetElement(i, j, projection[j][i]);
+        this->LeftEyeToProjectionMatrix->SetElement(i, j, projection[j][i]);
+      }
+    }
+  }
+
 }
 
 //------------------------------------------------------------------------------

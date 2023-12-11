@@ -26,8 +26,37 @@ https://github.com/ValveSoftware/openvr/blob/master/LICENSE
 #include "vtkOpenVRRenderWindowInteractor.h"
 #include "vtkRendererCollection.h"
 #include "vtkVRCamera.h"
+#include "interop.hpp"
 
 vtkStandardNewMacro(vtkOpenVRRenderWindow);
+
+class mint_communitcation_render
+{
+public:
+  mint_communitcation_render()
+  {
+    mint::DataProtocol zmq_protocol = mint::DataProtocol::TCP;
+    mint::ImageProtocol spout_protocol = mint::ImageProtocol::GPU;
+    mint::init(mint::Role::Rendering, zmq_protocol, spout_protocol);
+
+    ts_left = std::make_unique<mint::TextureSender>();
+    ts_left->init(mint::ImageType::LeftEye);
+    ts_right = std::make_unique<mint::TextureSender>();
+    ts_right->init(mint::ImageType::RightEye);
+
+    data_sender = std::make_unique<mint::DataSender>();
+    data_sender->start();
+  }
+  ~mint_communitcation_render()
+  {
+    data_sender->stop();
+  }
+
+  std::unique_ptr<mint::DataSender> data_sender;
+  std::unique_ptr<mint::TextureSender> ts_left;
+  std::unique_ptr<mint::TextureSender> ts_right;
+};
+std::unique_ptr<mint_communitcation_render> mint_comm_render;
 
 //------------------------------------------------------------------------------
 vtkOpenVRRenderWindow::vtkOpenVRRenderWindow()
@@ -272,6 +301,36 @@ void vtkOpenVRRenderWindow::StereoRenderComplete()
       (void*)(long)this->FramebufferDescs[vtkVRRenderWindow::RightEye].ResolveColorTextureId,
       vr::TextureType_OpenGL, vr::ColorSpace_Gamma
     };
+    vr::Texture_t leftEyeTexture = {
+      (void*)(long)this->FramebufferDescs[vtkVRRenderWindow::LeftEye].ResolveColorTextureId,
+      vr::TextureType_OpenGL, vr::ColorSpace_Gamma
+    };
+
+
+    // do init
+    if (mint_comm_render == nullptr)
+    {
+      mint_comm_render = std::make_unique<mint_communitcation_render>();
+    }
+
+    if (mint_comm_render != nullptr)
+    {
+      // Bounding Box
+      auto bboxCorners = mint::BoundingBoxCorners{ mint::vec4{ 0.0f, 0.0f, 0.0f, 1.0f },
+          mint::vec4{ 2.0f * 1.0f, 2.0f * 0.7f, 2.0f * 0.3f, 1.0f } };
+      bool success = mint_comm_render->data_sender->send(bboxCorners);
+
+      // Send Textures
+      if (rightEyeTexture.eType == 1)
+      {
+        int fb_size_x, fb_size_y;
+        this->GetRenderBufferSize(fb_size_x, fb_size_y);
+        mint_comm_render->ts_right->send(
+          (interop::uint)rightEyeTexture.handle, fb_size_x, fb_size_y);
+        mint_comm_render->ts_left->send((interop::uint)leftEyeTexture.handle, fb_size_x, fb_size_y);
+      }
+    }
+
     vr::VRCompositor()->Submit(vr::Eye_Right, &rightEyeTexture);
   }
 }
