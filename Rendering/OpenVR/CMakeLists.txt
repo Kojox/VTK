@@ -45,3 +45,5 @@ install(
   DESTINATION "${CMAKE_INSTALL_BINDIR}"
   COMPONENT   runtime
 )
+
+# testing
