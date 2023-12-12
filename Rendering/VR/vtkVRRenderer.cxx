@@ -120,6 +120,7 @@ void vtkVRRenderer::GetFloorTransform(vtkTransform* transform)
 //------------------------------------------------------------------------------
 void vtkVRRenderer::SetShowFloor(bool value)
 {
+  value = false;
   if (this->ShowFloor == value)
   {
     return;

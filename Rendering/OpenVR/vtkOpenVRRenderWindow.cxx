@@ -316,8 +316,10 @@ void vtkOpenVRRenderWindow::StereoRenderComplete()
     if (mint_comm_render != nullptr)
     {
       // Bounding Box
-      auto bboxCorners = mint::BoundingBoxCorners{ mint::vec4{ 0.0f, 0.0f, 0.0f, 1.0f },
-          mint::vec4{ 2.0f * 1.0f, 2.0f * 0.7f, 2.0f * 0.3f, 1.0f } };
+      float offset = 1.0f;
+      auto bboxCorners =
+        mint::BoundingBoxCorners{ mint::vec4{ -1.0f / 20.0f, -1.0f / 20.0f, -1.0f / 20.0f, 1.0f },
+        mint::vec4{ 1.0f / 20.0f, 1.0f / 20.0f, 1.0f / 20.0f, 1.0f } };
       bool success = mint_comm_render->data_sender->send(bboxCorners);
 
       // Send Textures
@@ -423,7 +425,7 @@ void vtkOpenVRRenderWindow::Initialize()
 {
   // Loading the SteamVR Runtime
   vr::EVRInitError eError = vr::VRInitError_None;
-  this->HMD = vr::VR_Init(&eError, vr::VRApplication_Scene);
+  this->HMD = vr::VR_Init(&eError, vr::VRApplication_Background);
 
   if (eError != vr::VRInitError_None)
   {
